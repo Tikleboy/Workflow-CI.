@@ -57,7 +57,7 @@ jobs:
         fi
         
         # Tentukan Nama Image: username/nama-image:tag
-        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/msml:latest"
+        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/sml:latest"
         
         # Perintah MLflow untuk bungkus model jadi Docker
         echo "Building Docker Image..."
