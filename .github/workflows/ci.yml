@@ -1,84 +1,94 @@
 name: CI Pipeline & Docker Build
 
-# Trigger: Jalan setiap kali ada Push
 on: [push]
 
 # Variabel Global
 env:
+  REPO_NAME: "Eksperimen_SML_StanlyLopez"
   DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
   DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
   MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
   MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
-  MLFLOW_TRACKING_URI: "https://dagshub.com/Tikleboy/Eksperimen_SML_StanlyLopez.mlflow"
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     
     steps:
-    # 1. Ambil kode dari repo
     - name: Checkout Repository
       uses: actions/checkout@v3
 
-    # 2. Siapkan Python
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
-    # 3. Install Library (VERSI CEPAT)
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        # --prefer-binary mempercepat installasi dengan menghindari kompilasi source code
         pip install mlflow dagshub pandas scikit-learn seaborn matplotlib --prefer-binary
 
-    # 4. Login ke Docker Hub
     - name: Login to Docker Hub
       uses: docker/login-action@v2
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
-    # 5. Jalankan Training (File MLProject)
+    # STEP BARU: DEBUGGING (Untuk memastikan Secret masuk)
+    - name: Check Secrets Presence
+      run: |
+        if [ -z "$DAGSHUB_USERNAME" ]; then
+          echo " BAHAYA: Secret DAGSHUB_USERNAME kosong! Cek Settings GitHub."
+          exit 1
+        else
+          echo " DAGSHUB_USERNAME terdeteksi (Hidden)."
+        fi
+        
+        if [ -z "$DAGSHUB_TOKEN" ]; then
+          echo " BAHAYA: Secret DAGSHUB_TOKEN kosong! Cek Settings GitHub."
+          exit 1
+        else
+          echo " DAGSHUB_TOKEN terdeteksi (Hidden)."
+        fi
+
+    # STEP UTAMA: Training
     - name: Run MLProject (Training)
       working-directory: ./MLProject
+      shell: bash
       run: |
+        # Kita susun URL secara eksplisit di sini untuk menghindari error variabel global
+        export MLFLOW_TRACKING_URI="https://dagshub.com/$DAGSHUB_USERNAME/$REPO_NAME.mlflow"
+        
+        echo "Menggunakan Tracking URI: $MLFLOW_TRACKING_URI"
+        
+        # Eksekusi MLflow Run
         mlflow run . --env-manager=local
       env:
-        # Pastikan kredensial tersedia saat training
+        # Paksa variabel masuk lagi di level step ini
         MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
         MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
-        MLFLOW_TRACKING_URI: ${{ env.MLFLOW_TRACKING_URI }}
 
-    # 6. Build Docker Image & Push
+    # STEP AKHIR: Build Docker
     - name: Build and Push Docker Image
       working-directory: ./MLProject
+      shell: bash
       run: |
-        echo "Mencari Run ID terbaru dari DagsHub..."
+        # Susun URI lagi
+        export MLFLOW_TRACKING_URI="https://dagshub.com/$DAGSHUB_USERNAME/$REPO_NAME.mlflow"
         
-        # Script Python inline untuk mengambil Run ID terakhir secara otomatis
-        RUN_ID=$(python -c "import mlflow; mlflow.set_tracking_uri('${{ env.MLFLOW_TRACKING_URI }}'); runs = mlflow.search_runs(experiment_names=['CI_Pipeline_Experiment'], order_by=['start_time DESC'], max_results=1); print(runs.iloc[0].run_id)")
+        echo " Mencari Run ID..."
+        RUN_ID=$(python -c "import mlflow; mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI'); runs = mlflow.search_runs(experiment_names=['CI_Pipeline_Experiment'], order_by=['start_time DESC'], max_results=1); print(runs.iloc[0].run_id)")
         
         if [ -z "$RUN_ID" ]; then
           echo " Error: Tidak ditemukan Run ID!"
           exit 1
         fi
         
-        echo "Detected Run ID: $RUN_ID"
+        echo " Run ID: $RUN_ID"
+        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/msml:latest"
         
-        # Tentukan Nama Image (username/nama-image:tag)
-        IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/sistemmachinelearning:latest"
-        
-        echo "Building Docker Image..."
-        
-        # Export ulang variable environment agar terbaca oleh perintah build
-        export MLFLOW_TRACKING_USERNAME=${{ secrets.DAGSHUB_USERNAME }}
-        export MLFLOW_TRACKING_PASSWORD=${{ secrets.DAGSHUB_TOKEN }}
-        export MLFLOW_TRACKING_URI=${{ env.MLFLOW_TRACKING_URI }}
-        
-        # Build Docker (Tanpa mlserver agar lebih ringan dan sesuai kriteria dasar)
+        echo "🔨 Building Docker Image..."
         mlflow models build-docker -m "runs:/$RUN_ID/model_final" -n "$IMAGE_NAME"
         
-        echo "Pushing to Docker Hub..."
+        echo " Pushing to Docker Hub..."
         docker push "$IMAGE_NAME"
