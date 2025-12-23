@@ -7,59 +7,60 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 import os
 
-# --- KONFIGURASI USER ---
-DAGSHUB_USERNAME = "Tickelboy"
-DAGSHUB_REPO_NAME = "Eksperimen_SML_StanlyLopez" 
+# --- KONFIGURASI ---
+DAGSHUB_USERNAME = "tickelboy" 
+DAGSHUB_REPO_NAME = "Eksperimen_SML_StanlyLopez"
 
 # --- LOGIC OTENTIKASI ---
 token = os.getenv("DAGSHUB_TOKEN")
-
 if token:
-    print(f"Terdeteksi CI/CD Environment. Menggunakan Login Token Manual ke {DAGSHUB_REPO_NAME}")
-    # Cara Manual: Lebih stabil untuk CI/CD karena tidak memicu browser login
-    uri = f"https://dagshub.com/{DAGSHUB_USERNAME}/{DAGSHUB_REPO_NAME}.mlflow"
-    mlflow.set_tracking_uri(uri)
-    
-    # Set kredensial secara eksplisit ke Environment Variables
+    print(f"CI/CD Mode: Login manual ke {DAGSHUB_REPO_NAME}")
     os.environ['MLFLOW_TRACKING_USERNAME'] = DAGSHUB_USERNAME
     os.environ['MLFLOW_TRACKING_PASSWORD'] = token
+    mlflow.set_tracking_uri(f"https://dagshub.com/Tikleboy/Eksperimen_SML_StanlyLopez.mlflow")
 else:
-    print("Terdeteksi Lokal Environment. Menggunakan dagshub.init()")
-    # Cara Lokal: Praktis untuk di laptop
+    print("Local Mode: Menggunakan dagshub.init()")
     dagshub.init(repo_owner=DAGSHUB_USERNAME, repo_name=DAGSHUB_REPO_NAME, mlflow=True)
 
 mlflow.set_experiment("CI_Pipeline_Experiment")
 
 def train_model():
     print("Loading data...")
-    # Path file (Pastikan file ada di folder data_preprocessing dalam MLProject)
+    # Path disesuaikan karena script dijalankan di dalam folder MLProject
     file_path = "data_preprocessing/loan_preprocessing.csv"
     
-    # Sedikit error handling agar path aman
     if not os.path.exists(file_path):
-        print(f"Error: File tidak ditemukan di {file_path}")
-        print(f"Isi folder saat ini: {os.listdir('.')}")
+        print(f"Error: File {file_path} tidak ditemukan.")
         return
 
     df = pd.read_csv(file_path)
-    
-    target_col = 'Loan_Approved'
-    X = df.drop(columns=[target_col])
-    y = df[target_col]
+    X = df.drop(columns=['Loan_Approved'])
+    y = df['Loan_Approved']
     
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
     
     print("Starting training...")
-    with mlflow.start_run():
+    
+    # Tangkap object 'run' agar kita bisa ambil ID-nya
+    with mlflow.start_run() as run:
         model = RandomForestClassifier(n_estimators=50, random_state=42)
         model.fit(X_train, y_train)
         
         preds = model.predict(X_test)
         acc = accuracy_score(y_test, preds)
         
+        # Log Metrics
         mlflow.log_metric("accuracy", acc)
-        mlflow.sklearn.log_model(model, "model")
-        print(f"Model trained successfully! Accuracy: {acc:.4f}")
+        
+        # 1. SIMPAN MODEL DENGAN NAMA 'model_final' (Sesuai request YAML Anda)
+        mlflow.sklearn.log_model(model, "model_final")
+        print(f"Model saved as 'model_final'. Accuracy: {acc:.4f}")
+        
+        # 2. SIMPAN RUN ID KE FILE TEXT (PENTING UNTUK YAML)
+        run_id = run.info.run_id
+        with open("run_id.txt", "w") as f:
+            f.write(run_id)
+        print(f"Run ID {run_id} saved to run_id.txt")
 
 if __name__ == "__main__":
     train_model()
